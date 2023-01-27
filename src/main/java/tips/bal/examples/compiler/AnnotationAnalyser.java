@@ -27,6 +27,7 @@ import io.ballerina.compiler.syntax.tree.SpecificFieldNode;
 import io.ballerina.compiler.syntax.tree.SyntaxTree;
 import io.ballerina.compiler.syntax.tree.Token;
 import io.ballerina.compiler.syntax.tree.TypeDefinitionNode;
+import io.ballerina.compiler.syntax.tree.UnaryExpressionNode;
 import io.ballerina.projects.Document;
 import io.ballerina.projects.Module;
 import io.ballerina.projects.Package;
@@ -39,9 +40,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
+import static io.ballerina.compiler.syntax.tree.SyntaxKind.BOOLEAN_LITERAL;
+import static io.ballerina.compiler.syntax.tree.SyntaxKind.MINUS_TOKEN;
+import static io.ballerina.compiler.syntax.tree.SyntaxKind.NEGATION_TOKEN;
 import static io.ballerina.compiler.syntax.tree.SyntaxKind.NUMERIC_LITERAL;
 import static io.ballerina.compiler.syntax.tree.SyntaxKind.RECORD_TYPE_DESC;
 import static io.ballerina.compiler.syntax.tree.SyntaxKind.SPECIFIC_FIELD;
+import static io.ballerina.compiler.syntax.tree.SyntaxKind.STRING_LITERAL;
+import static io.ballerina.compiler.syntax.tree.SyntaxKind.UNARY_EXPRESSION;
 
 /**
  * Basic Annotation Validator using Compiler APIs.
@@ -54,12 +60,8 @@ public class AnnotationAnalyser {
     private static final String EXAMPLE_HOME = "ballerina-sources";
     private static final String USER_DIR = "user.dir";
 
-    public static void main(String[] args) {
-        AnnotationAnalyser annotationAnalyser = new AnnotationAnalyser();
-        annotationAnalyser.analyseAnnotations();
-    }
 
-    public void analyseAnnotations() {
+    public List<String> analyseStudentAnnotations() {
         final Project project = getAnnotationProject();
         final Package currentPackage = project.currentPackage();
         final PackageCompilation compilation = currentPackage.getCompilation();// Compile
@@ -80,11 +82,10 @@ public class AnnotationAnalyser {
         // Get the semantic model
         final SemanticModel semanticModel = compilation.getSemanticModel(defaultModule.moduleId());
 
-        // Task 1: Get Annotation in type definition Student in main.bal
-        processStudentAnnotations(syntaxTree, semanticModel);
+        return processStudentAnnotations(syntaxTree, semanticModel);
     }
 
-    public void processStudentAnnotations(SyntaxTree syntaxTree, SemanticModel semModel) {
+    public List<String> processStudentAnnotations(SyntaxTree syntaxTree, SemanticModel semModel) {
         final TypeDefVisitor typeDefVisitor = new TypeDefVisitor();
         syntaxTree.rootNode().accept(typeDefVisitor);
         final List<TypeDefinitionNode> typeDefinitionNodes = typeDefVisitor.getTypeDefinitionNodes();
@@ -97,6 +98,7 @@ public class AnnotationAnalyser {
             throw new IllegalStateException("Student type is not a record");
         }
         RecordTypeDescriptorNode recordNode = (RecordTypeDescriptorNode) studentType;
+        List<String> results = new ArrayList<>();
         for (Node node : recordNode.fields()) {
             RecordFieldNode fieldNode = (RecordFieldNode) node;
             if (fieldNode.metadata().isPresent()) {
@@ -110,10 +112,9 @@ public class AnnotationAnalyser {
                                 final SpecificFieldNode specificFieldNode = (SpecificFieldNode) mappingFieldNode;
                                 final String fieldName = specificFieldNode.fieldName().toString().trim();
 
-                                RecordFieldSymbol fieldSymbol = (RecordFieldSymbol) semModel
-                                        .symbol(specificFieldNode).orElseThrow();
-
-                                String valueType = fieldSymbol.typeDescriptor().signature();
+                                String valueType = semModel.symbol(specificFieldNode)
+                                        .map(f -> ((RecordFieldSymbol) f).typeDescriptor().signature())
+                                        .orElse(null);
                                 String value = null;
 
                                 // Must have a value, otherwise compilation error.
@@ -126,11 +127,22 @@ public class AnnotationAnalyser {
                                     value = constantSymbol.constValue().toString();
                                     // Correct type from Value
                                     valueType = constantSymbol.typeDescriptor().signature();
-                                } else if (expressionNode != null && expressionNode.kind() == NUMERIC_LITERAL) {
-                                    Token literalToken = ((BasicLiteralNode) expressionNode).literalToken();
-                                    value = literalToken.text();
-                                } // Else Handle other literal like above.
-                                System.out.println("Annotation " + annotationName + "field: " + fieldName +
+                                } else if (expressionNode != null) {
+                                    if (expressionNode.kind() == NUMERIC_LITERAL
+                                            || expressionNode.kind() == STRING_LITERAL
+                                            || expressionNode.kind() == BOOLEAN_LITERAL) {
+                                        Token literalToken = ((BasicLiteralNode) expressionNode).literalToken();
+                                        value = literalToken.text();
+                                    } else if (expressionNode.kind() == UNARY_EXPRESSION) {
+                                        UnaryExpressionNode unaryExpressionNode = (UnaryExpressionNode) expressionNode;
+                                        if (unaryExpressionNode.unaryOperator().kind() == MINUS_TOKEN) {
+                                            Token literalToken = ((BasicLiteralNode) unaryExpressionNode.expression())
+                                                    .literalToken();
+                                            value = "-" + literalToken.text();
+                                        }
+                                    }
+                                }
+                                results.add("Annotation " + annotationName + "field: " + fieldName +
                                         " value: " + value + " type: " + valueType);
                             }
                         }
@@ -139,6 +151,7 @@ public class AnnotationAnalyser {
             }
 
         }
+        return results;
     }
 
     private Project getAnnotationProject() {
@@ -147,6 +160,9 @@ public class AnnotationAnalyser {
         return compilerRunner.compile(Paths.get(userDir.toString(), EXAMPLE_HOME, PROJECT_PATH));
     }
 
+    /**
+     * Visitor to get the TypeDefinitionNode.
+     */
     private static class TypeDefVisitor extends NodeVisitor {
 
         List<TypeDefinitionNode> typeDefinitionNodes = new ArrayList<>();

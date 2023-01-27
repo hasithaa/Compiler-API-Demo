@@ -28,3 +28,7 @@ dependencies {
     implementation group: 'org.ballerinalang', name: 'ballerina-tools-api', version: "${ballerinaLangVersion}"
     testImplementation 'org.testng:testng:7.3.0'
 }
+
+test {
+    useTestNG()
+}

@@ -18,7 +18,8 @@ type Student record {|
         max: 5,
         min: -10,
         pattern: "Marks",
-        active: false
+        active: false,
+        "low": int:MIN_VALUE
     }
     int marks;
 |};
